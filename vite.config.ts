@@ -8,9 +8,9 @@ export default defineConfig(({ command }) => {
             base: "/",
       };
 
-      if (command !== "serve") {
-            config.base = "/app/";
-      }
+      // if (command !== "serve") {
+      //       config.base = "/app/";
+      // }
 
       return config;
 });
