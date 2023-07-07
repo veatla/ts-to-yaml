@@ -1,16 +1,7 @@
 # TypeScript Types to Swagger(YAML) Schema
 
 I can't find an app where I can convert TS Type to YAML, so I made this.
-Currently It's works with simple types/interfaces
-
-## Todo list
-- `type` & `interface` ✅
-- Required type ✅
-- Optional type ✅
-- `enum` ❌
-- References ❌
-- Array types ❌
-- ??? ❌
+Currently It's works with simple types/interfaces/enums
 
 ## Example:
 
