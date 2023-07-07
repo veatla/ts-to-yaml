@@ -83,6 +83,8 @@ export function typeFormatter(tsValue: string) {
                   typeMapper(node);
             } else if (isEnum) {
                   enumMapper(node);
+            } else if (isInterface) {
+                  interfaceMapper(node);
             }
       }
       for (const [key, value] of typesList) {
@@ -105,6 +107,20 @@ export function typeFormatter(tsValue: string) {
             val.value += `\n`;
       }
       return val.value;
+}
+function interfaceMapper(node: InterfaceDeclaration) {
+      const name = node.name.text;
+      const item: InterfaceItem = {
+            properties: [],
+            requiredList: [],
+            title: name,
+            type: "type",
+      };
+      console.log(node);
+      if ("members" in node) {
+            typeMemberMapper(node.members, item);
+      }
+      typesList.set(name, item);
 }
 function typeMapper(node: TypeAliasDeclaration) {
       const name = node.name.text;
@@ -310,10 +326,10 @@ function checkType(value: string, isParent?: boolean) {
             item.type = "";
             if (!isParent) {
                   item.isReferenced = value;
-                  // const check = checkType(value, true);
-                  // if (check.type === "array" || check.type === value) {
-                  //       item.isReferenced = value;
-                  // }
+                  const check = checkType(value, true);
+                  if (check.type === "array" || check.type === value) {
+                        item.isReferenced = value;
+                  }
             }
       }
       return item;
