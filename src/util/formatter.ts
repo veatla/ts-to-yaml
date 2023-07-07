@@ -8,7 +8,6 @@ import {
       EnumDeclaration,
       InterfaceDeclaration,
       TypeAliasDeclaration,
-      MappedTypeNode,
       TypeElement,
       TypeNode,
       SourceFile,
