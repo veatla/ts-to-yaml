@@ -12,23 +12,40 @@ import {
       TypeElement,
       TypeNode,
       SourceFile,
+      NodeArray,
+      SyntaxKind,
 } from "typescript";
 const tab = (count = 1) => "  ".repeat(count);
-// const regexJsDocComments = new RegExp(/\/\*\*[^*/]*\*\//gm);
-// const regexDefaultComments = new RegExp(/\/\/[^\n]*/gm);
-// const regexMultiLineComments = new RegExp(/\/\*[^*/]*\*\//);
-// const regexTypescriptItem = new RegExp(
-//       /(type|enum|interface)\s+(\w+)\s+(=\s+)?\{[^}]*}/gm
-// );
-// const regexTypescriptTitle = new RegExp(/(type|interface|enum)\s+(\w+)/);
-// const regexKeyAndDefinition = new RegExp(
-//       /([^?\n:=]+)\s*(\??:|=){1}\s*(["'`\w*\s]{2,}(\s*\|\s*[\w\s"'`]+)*)/g
-// );
+const getTypeScriptKind = (value: SyntaxKind) => {
+      switch (value) {
+            case SyntaxKind.ArrayType:
+                  return "array";
+            case SyntaxKind.NumberKeyword:
+                  return "number";
+            case SyntaxKind.NumericLiteral:
+                  return "number";
+            case SyntaxKind.StringLiteral:
+                  return "string";
+            case SyntaxKind.ArrayLiteralExpression:
+                  return "array";
+            case SyntaxKind.ObjectLiteralExpression:
+                  return "object";
+            case SyntaxKind.FalseKeyword:
+                  return "boolean";
+            case SyntaxKind.TrueKeyword:
+                  return "boolean";
+
+            default:
+                  console.log(value);
+                  return "undefined";
+      }
+};
 type PropertyItemType = {
       keyName: string;
       definitions: string[];
       types: string[];
       items: string;
+      isReferenced: string | null;
       isRequired: boolean;
       isLiteral: boolean;
 };
@@ -40,29 +57,32 @@ type InterfaceItem = {
 };
 
 const typesList = new Map<string, InterfaceItem>();
-const TypescriptItems = new Map<string, InterfaceItem>();
-
+const source: {
+      file: SourceFile | null;
+} = {
+      file: null,
+};
 export function typeFormatter(tsValue: string) {
       typesList.clear();
+      source.file = null;
       const val = {
             value: "",
       };
-      const sourceFile = createSourceFile(
+      source.file = createSourceFile(
             "dummy.ts",
             tsValue,
             ScriptTarget.Latest,
             false,
             ScriptKind.TS
       );
-      for (const node of sourceFile.statements) {
-            const isValid =
-                  isEnumDeclaration(node) ||
-                  isInterfaceDeclaration(node) ||
-                  isTypeAliasDeclaration(node);
-            if (isValid) {
-                  if ("type" in node && "members" in node.type) {
-                        typeMapper(node, sourceFile);
-                  }
+      for (const node of source.file.statements) {
+            const isEnum = isEnumDeclaration(node),
+                  isInterface = isInterfaceDeclaration(node),
+                  isType = isTypeAliasDeclaration(node);
+            if (isType) {
+                  typeMapper(node);
+            } else if (isEnum) {
+                  enumMapper(node);
             }
       }
       for (const [key, value] of typesList) {
@@ -86,9 +106,7 @@ export function typeFormatter(tsValue: string) {
       }
       return val.value;
 }
-
-function typeMapper(node: TypeAliasDeclaration, sourceFile: SourceFile) {
-      const mappedTypeNode = node.type as MappedTypeNode;
+function typeMapper(node: TypeAliasDeclaration) {
       const name = node.name.text;
       const item: InterfaceItem = {
             properties: [],
@@ -96,11 +114,31 @@ function typeMapper(node: TypeAliasDeclaration, sourceFile: SourceFile) {
             title: name,
             type: "type",
       };
-      for (const member of mappedTypeNode.members ?? []) {
-            const memberName = member?.name?.getText(sourceFile);
+      if (node.type) {
+            if ("literal" in node.type) {
+                  const literal = node.type.literal as TypeElement;
+                  if (literal) typeMemberMapper(Array(literal), item);
+            } else if ("members" in node.type) {
+                  typeMemberMapper(
+                        node.type.members as NodeArray<TypeElement>,
+                        item
+                  );
+            }
+      }
+
+      typesList.set(name, item);
+}
+function typeMemberMapper(
+      membersList: NodeArray<TypeElement> | TypeElement[],
+      item: InterfaceItem
+) {
+      if (!source.file) return false;
+      for (const member of membersList ?? []) {
+            const memberName = member?.name?.getText(source.file);
             const property: PropertyItemType = {
                   definitions: [],
                   isLiteral: false,
+                  isReferenced: null as string | null,
                   isRequired: false,
                   items: "",
                   keyName: `${memberName}`,
@@ -108,12 +146,47 @@ function typeMapper(node: TypeAliasDeclaration, sourceFile: SourceFile) {
             };
             const type = "type" in member ? (member.type as TypeNode) : null;
             if (memberName) {
-                  const definitions = type
-                        ?.getText(sourceFile)
-                        .split(/\s*\|\s*/gm);
+                  const types = type?.getText(source.file).split(/\s*\|\s*/gm);
                   if (!member?.questionToken) {
                         item.requiredList.push(memberName);
                   }
+                  if (types?.length) {
+                        for (const definition of types) {
+                              const check = checkType(definition);
+                              property.types.push(check.type);
+                              if (check.isLiteral) {
+                                    property.isLiteral = check.isLiteral;
+                              }
+                              if (check.isReferenced) {
+                                    property.isReferenced = check.isReferenced;
+                              }
+                        }
+                  }
+            }
+            item.properties.push(property);
+      }
+}
+function memberMapper(
+      membersList: EnumDeclaration["members"],
+      item: InterfaceItem
+) {
+      if (!source.file) return false;
+      for (const member of membersList ?? []) {
+            const memberName = member?.name?.getText(source.file);
+            const property: PropertyItemType = {
+                  definitions: [],
+                  isLiteral: false,
+                  isRequired: false,
+                  isReferenced: null,
+                  items: "",
+                  keyName: `${memberName}`,
+                  types: [],
+            };
+            const type = "type" in member ? (member.type as TypeNode) : null;
+            if (memberName) {
+                  const definitions = type
+                        ?.getText(source.file)
+                        .split(/\s*\|\s*/gm);
                   if (definitions?.length) {
                         for (const definition of definitions) {
                               const check = checkType(definition);
@@ -121,11 +194,35 @@ function typeMapper(node: TypeAliasDeclaration, sourceFile: SourceFile) {
                               if (check.isLiteral) {
                                     property.isLiteral = check.isLiteral;
                               }
+                              if (check.isReferenced) {
+                                    property.isReferenced = check.isReferenced;
+                              }
                         }
+                  } else {
+                        const initializer = member.initializer?.getText(
+                              source.file
+                        );
+                        if (member.initializer?.kind) {
+                              property.types.push(
+                                    getTypeScriptKind(member.initializer?.kind)
+                              );
+                        }
+                        if (initializer) property.definitions.push(initializer);
                   }
             }
-            item.properties.push(property)
+            item.properties.push(property);
       }
+}
+function enumMapper(node: EnumDeclaration) {
+      const name = node.name.text;
+      const item: InterfaceItem = {
+            properties: [],
+            requiredList: [],
+            title: name,
+            type: "enum",
+      };
+
+      if (node.members) memberMapper(node.members, item);
       typesList.set(name, item);
 }
 function enumToString(properties: PropertyItemType[]) {
@@ -152,12 +249,13 @@ function enumToString(properties: PropertyItemType[]) {
       return te.xt;
 }
 function propertyObjectToString(properties: PropertyItemType) {
-      const { isLiteral, items, keyName, definitions, types } = properties;
+      const { isLiteral, isReferenced, items, keyName, definitions, types } =
+            properties;
       const te = {
             xt: "",
       };
 
-      const type = [...new Set(types)];
+      const type = [...new Set(types.filter((v) => v.length))];
       te.xt += `${tab(2)}${keyName}:\n`;
 
       if (type.length > 1) {
@@ -166,9 +264,13 @@ function propertyObjectToString(properties: PropertyItemType) {
                   te.xt += `${tab(4)}- type: ${t}\n`;
             }
       } else {
-            te.xt += `${tab(3)}type: ${type[0]}\n`;
+            if (type[0]) te.xt += `${tab(3)}type: ${type[0]}\n`;
       }
+      if (isReferenced) {
+            te.xt += `${tab(3)}$ref: '#/components/schemas/${isReferenced}'\n`;
 
+            return te.xt;
+      }
       if (isLiteral) {
             te.xt += `${tab(3)}enum:\n`;
             for (const definition of definitions) {
@@ -183,10 +285,11 @@ function propertyObjectToString(properties: PropertyItemType) {
       return te.xt;
 }
 
-function checkType(value: string) {
+function checkType(value: string, isParent?: boolean) {
       const item = {
             type: "undefined",
             isLiteral: false,
+            isReferenced: null as string | null,
       };
       const isLiteralString = /"(?:[^"\\]|\\.)*"/gim.test(value);
       if (isLiteralString) {
@@ -200,7 +303,19 @@ function checkType(value: string) {
       else if (value.includes("number")) item.type = "number";
       else if (value.includes("integer")) item.type = "integer";
       else if (value.includes("boolean")) item.type = "boolean";
-      else if (value.includes("[]")) item.type = "array";
+      else if (value.includes("[]")) {
+            item.isReferenced = value.replace("[]", "");
+            item.type = "array";
+      } else {
+            item.type = "";
+            if (!isParent) {
+                  item.isReferenced = value;
+                  // const check = checkType(value, true);
+                  // if (check.type === "array" || check.type === value) {
+                  //       item.isReferenced = value;
+                  // }
+            }
+      }
       return item;
       //     throw new Error(
       //       `${value} should be equal to one of the allowed values.`
